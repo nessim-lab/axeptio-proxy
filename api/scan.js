@@ -62,10 +62,40 @@ module.exports = async function handler(req, res) {
         const gcsValue = allUrls.map(u => u.match(/[?&]gcs=([^&\s]+)/)?.[1]).find(Boolean) || null;
         const gcdValue = allUrls.map(u => u.match(/[?&]gcd=([^&\s]+)/)?.[1]).find(Boolean) || null;
 
-        const hasCM      = !!(gcsValue || gcdValue);
-        // gcs v2 : commence par G1 + 4 caractères minimum (ex: G10000, G11111)
-        const consentModeV2 = hasCM && gcsValue ? gcsValue.length >= 6 : false;
-        const consentModeV1 = hasCM && !consentModeV2;
+        // ── Consent Mode — détection en 2 niveaux ──────────────────────────
+
+        // Niveau 1 : Advanced CM — paramètre gcs= dans les URLs GA4
+        // gcs v1 = 4 chars (ex: G100), gcs v2 = 6 chars (ex: G10000)
+        const hasCM = !!(gcsValue || gcdValue);
+        const consentModeV2Advanced = hasCM && gcsValue ? gcsValue.length >= 6 : false;
+        const consentModeV1Advanced = hasCM && !consentModeV2Advanced;
+
+        // Niveau 2 : Basic CM — lire le container GTM pour chercher
+        // ad_user_data et ad_personalization dans gtag('consent','default',{...})
+        let consentModeV2Basic = false;
+        let consentModeV1Basic = false;
+        let gtmContainerCode = null;
+        try {
+          const gtmUrl = allUrls.find(u => u.includes("googletagmanager.com/gtm.js"));
+          if (gtmUrl) {
+            const gtmRes = await fetch(gtmUrl, { signal: AbortSignal.timeout(5000) });
+            if (gtmRes.ok) {
+              gtmContainerCode = await gtmRes.text();
+              const hasAdUserData        = gtmContainerCode.includes("ad_user_data");
+              const hasAdPersonalization = gtmContainerCode.includes("ad_personalization");
+              const hasConsentDefault    = gtmContainerCode.includes("consent") && gtmContainerCode.includes("default");
+              if (hasConsentDefault && hasAdUserData && hasAdPersonalization) {
+                consentModeV2Basic = true;
+              } else if (hasConsentDefault) {
+                consentModeV1Basic = true;
+              }
+            }
+          }
+        } catch(_) { /* GTM fetch optionnel */ }
+
+        const consentModeV2 = consentModeV2Advanced || consentModeV2Basic;
+        const consentModeV1 = !consentModeV2 && (consentModeV1Advanced || consentModeV1Basic);
+        // ───────────────────────────────────────────────────────────────────
         // ───────────────────────────────────────────────────────────────────
 
         return res.status(200).json({
