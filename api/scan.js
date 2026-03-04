@@ -55,20 +55,17 @@ module.exports = async function handler(req, res) {
             .filter(Boolean)
         )];
 
-        // ── Consent Mode — approche InfoTrust ──────────────────────────────
-        // CM v2 : paramètres ad_user_data ou ad_personalization dans les URLs
-        const hasAdUserData        = allUrls.some(u => u.includes("ad_user_data"));
-        const hasAdPersonalization = allUrls.some(u => u.includes("ad_personalization"));
-        const consentModeV2        = hasAdUserData || hasAdPersonalization;
+        // ── Consent Mode — détection via paramètre gcs= dans les URLs réseau ──
+        // Le paramètre gcs= est envoyé en GET vers google-analytics.com
+        // Format gcs : G1XX (4 chars) = v1 | G1XXXX (6 chars) = v2
+        // car v2 ajoute ad_user_data + ad_personalization (2 chars supplémentaires)
+        const gcsValue = allUrls.map(u => u.match(/[?&]gcs=([^&\s]+)/)?.[1]).find(Boolean) || null;
+        const gcdValue = allUrls.map(u => u.match(/[?&]gcd=([^&\s]+)/)?.[1]).find(Boolean) || null;
 
-        // CM v1 : paramètres gcs= ou gcd= présents sans signaux v2
-        const hasGCS        = allUrls.some(u => /[?&]gcs=/.test(u));
-        const hasGCD        = allUrls.some(u => /[?&]gcd=/.test(u));
-        const consentModeV1 = !consentModeV2 && (hasGCS || hasGCD);
-
-        // Valeurs brutes pour debug
-        const gcdValue = allUrls.map(u => u.match(/[?&]gcd=([^&]+)/)?.[1]).find(Boolean) || null;
-        const gcsValue = allUrls.map(u => u.match(/[?&]gcs=([^&]+)/)?.[1]).find(Boolean) || null;
+        const hasCM      = !!(gcsValue || gcdValue);
+        // gcs v2 : commence par G1 + 4 caractères minimum (ex: G10000, G11111)
+        const consentModeV2 = hasCM && gcsValue ? gcsValue.length >= 6 : false;
+        const consentModeV1 = hasCM && !consentModeV2;
         // ───────────────────────────────────────────────────────────────────
 
         return res.status(200).json({
